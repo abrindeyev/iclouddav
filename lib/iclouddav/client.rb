@@ -24,6 +24,8 @@ module ICloud
       @server = server
       @port = 443
 
+      @_http_cons = {}
+
       @principal = fetch_principal
       @calendars = fetch_calendars
     end
@@ -80,14 +82,27 @@ END
 
   private
     def http_fetch(req_type, url, headers = {}, data = nil)
-      host = Net::HTTP.new(self.server, self.port)
-      host.use_ssl = true
-      host.verify_mode = OpenSSL::SSL::VERIFY_PEER
-      #host.set_debug_output $stdout
+      # keep the connection alive since we're probably sending all requests to
+      # it anyway and we'll gain some speed by not reconnecting every time
+      if !(host = @_http_cons["#{self.server}:#{self.port}"])
+        host = Net::HTTP.new(self.server, self.port)
+        host.use_ssl = true
+        host.verify_mode = OpenSSL::SSL::VERIFY_PEER
+
+        #host.set_debug_output $stdout
+
+        # if we don't call start ourselves, host.request will, but it will do
+        # it in a block that will call finish when exiting request, closing the
+        # connection even though we're specifying keep-alive
+        host.start
+
+        @_http_cons["#{self.server}:#{self.port}"] = host
+      end
 
       req = req_type.new(url)
       req.basic_auth self.email, self.password
 
+      req["Connection"] = "keep-alive"
       req["Content-Type"] = "text/xml; charset=\"UTF-8\""
 
       headers.each do |k,v|
@@ -112,8 +127,8 @@ END
     end
 
     def fetch_calendars
-      # this is supposed to propfind "calendar-home-set" but icloud doesn't seem
-      # to support that, so we skip that lookup and hard-code to
+      # this is supposed to propfind "calendar-home-set" but icloud doesn't
+      # seem to support that, so we skip that lookup and hard-code to
       # "/[principal user id]/calendars/" which is what calendar-home-set would
       # probably return anyway
 
@@ -129,7 +144,7 @@ END
           elements["displayname"].text
 
         # assuming urls are unique and names might not be
-        cals[name] = ICloudCalendar.new(self, path, name)
+        cals[name] = Calendar.new(self, path, name)
       end
 
       cals
