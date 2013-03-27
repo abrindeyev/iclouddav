@@ -13,7 +13,7 @@ end
 
 module ICloud
   class Client
-    attr_accessor :server, :port, :email, :password
+    attr_accessor :server, :port, :email, :password, :debug
     attr_reader :principal, :calendars
 
     DEFAULT_SERVER = "p01-caldav.icloud.com"
@@ -24,10 +24,20 @@ module ICloud
       @server = server
       @port = 443
 
+      @debug = false
       @_http_cons = {}
+    end
 
-      @principal = fetch_principal
-      @calendars = fetch_calendars
+    def principal
+      @principal ||= fetch_principal
+    end
+
+    def calendars
+      @calendars ||= fetch_calendars
+    end
+
+    def get(url, headers = {})
+      http_fetch(Net::HTTP::Get, url, headers)
     end
 
     def propfind(url, headers = {}, xml)
@@ -40,12 +50,12 @@ module ICloud
 
     def fetch_calendar_data(url)
       xml = self.report(url, { "Depth" => 1 }, <<END
-        <sync-collection xmlns="DAV:">
-          <sync-token/>
-          <prop>
-            <getcontenttype/>
-          </prop>
-        </sync-collection>
+        <d:sync-collection xmlns:d="DAV:">
+          <d:sync-token/>
+          <d:prop>
+            <d:getcontenttype/>
+          </d:prop>
+        </d:sync-collection>
 END
         )
 
@@ -58,26 +68,23 @@ END
         end
       end
 
-      cal_datas = []
-      hrefs.each do |href|
-        xml = self.report(href, { "Depth" => 1 }, <<END
-          <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
-            <d:prop>
-              <d:getetag />
-              <c:calendar-data />
-            </d:prop>
-            <c:filter>
-              <c:comp-filter name="VCALENDAR" />
-            </c:filter>
-          </c:calendar-query>
+      # bundle them all in one multiget
+      xml = self.report(url, { "Depth" => 1 }, <<END
+        <c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+          <d:prop>
+            <c:calendar-data />
+          </d:prop>
+          <c:filter>
+            <c:comp-filter name="VCALENDAR" />
+          </c:filter>
+          #{hrefs.map{|h| '<d:href>' << h << '</d:href>'}.join}
+        </c:calendar-multiget>
 END
-          )
+        )
 
-        cal_datas.push REXML::XPath.first(xml,
-          "//multistatus/response/propstat/prop/calendar-data").text
-      end
-
-      cal_datas.join
+      REXML::XPath.each(xml,
+        "//multistatus/response/propstat/prop/calendar-data").map{|e| e.text }.
+        join
     end
 
   private
@@ -89,7 +96,9 @@ END
         host.use_ssl = true
         host.verify_mode = OpenSSL::SSL::VERIFY_PEER
 
-        #host.set_debug_output $stdout
+        if self.debug
+          host.set_debug_output $stdout
+        end
 
         # if we don't call start ourselves, host.request will, but it will do
         # it in a block that will call finish when exiting request, closing the
@@ -143,7 +152,6 @@ END
         name = cal.elements["propstat"].elements["prop"].
           elements["displayname"].text
 
-        # assuming urls are unique and names might not be
         cals[name] = Calendar.new(self, path, name)
       end
 
