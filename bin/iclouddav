@@ -1,0 +1,29 @@
+#!/usr/bin/env ruby
+
+require File.realpath(File.dirname(__FILE__) + "/../lib/iclouddav")
+require "getoptlong"
+
+OPTS = [
+  [ "--email", "-e", GetoptLong::REQUIRED_ARGUMENT,
+    "iCloud account e-mail address" ],
+  [ "--password", "-p", GetoptLong::REQUIRED_ARGUMENT,
+    "iCloud account password" ],
+]
+
+email = nil
+password = nil
+
+GetoptLong.new(*OPTS.map{|o| o[0 ... -1] }).each do |opt,arg|
+  case opt
+  when "--email"
+    email = arg
+
+  when "--password"
+    password = arg
+  end
+end
+
+if email.blank? || password.blank?
+  STDERR.puts "usage: #{$0} -e <icloud email> -p <icloud password> <action>"
+  exit 1
+end
