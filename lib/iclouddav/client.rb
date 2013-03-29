@@ -13,15 +13,18 @@ end
 
 module ICloud
   class Client
-    attr_accessor :caldav_server, :port, :email, :password, :debug
+    attr_accessor :caldav_server, :carddav_server, :port, :email, :password,
+      :debug
 
     DEFAULT_CALDAV_SERVER = "p01-caldav.icloud.com"
     DEFAULT_CARDDAV_SERVER = "p01-contacts.icloud.com"
 
-    def initialize(email, password, caldav_server = DEFAULT_CALDAV_SERVER)
+    def initialize(email, password, caldav_server = DEFAULT_CALDAV_SERVER,
+    carddav_server = DEFAULT_CARDDAV_SERVER)
       @email = email
       @password = password
       @caldav_server = caldav_server
+      @carddav_server = carddav_server
       @port = 443
 
       @debug = false
@@ -74,7 +77,8 @@ END
 
       # bundle them all in one multiget
       xml = self.report(self.caldav_server, url, { "Depth" => 1 }, <<END
-        <c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+        <c:calendar-multiget xmlns:d="DAV:"
+        xmlns:c="urn:ietf:params:xml:ns:caldav">
           <d:prop>
             <c:calendar-data />
           </d:prop>
@@ -139,6 +143,7 @@ END
         "//response/propstat/prop/current-user-principal/href").text
     end
 
+    # returns an array of Calendar objects
     def fetch_calendars
       # this is supposed to propfind "calendar-home-set" but icloud doesn't
       # seem to support that, so we skip that lookup and hard-code to
@@ -150,17 +155,53 @@ END
         '<d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop>' <<
         '</d:propfind>')
 
-      cals = {}
-
-      REXML::XPath.each(xml, "//multistatus/response") do |cal|
+      REXML::XPath.each(xml, "//multistatus/response").map do |cal|
         path = cal.elements["href"].text
         name = cal.elements["propstat"].elements["prop"].
           elements["displayname"].text
 
-        cals[name] = Calendar.new(self, path, name)
+        Calendar.new(self, path, name)
+      end
+    end
+
+    # returns an array of Contact objects
+    def fetch_contacts
+      carddav_home = "/#{self.principal.split("/")[1]}/carddavhome/card/"
+
+      xml = self.propfind(self.carddav_server, carddav_home, { "Depth" => 1 },
+        '<d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop>' <<
+        '</d:propfind>')
+
+      # gather the separate .vcf urls for each non-addressbook object in this
+      # calendar (looking for a text/vcard contenttype would be preferable, but
+      # icloud doesn't show that for all cards)
+      cards = []
+      REXML::XPath.each(xml, "//multistatus/response") do |card|
+        if !card.elements["propstat"].elements["prop"].
+        elements["resourcetype"].text.to_s.match(/addressbook/)
+          cards.push card.elements["href"].text
+        end
       end
 
-      cals
+      # fetch all vcard data in one multiget
+      xml = self.report(self.carddav_server, carddav_home, { "Depth" => 1 },
+        <<END
+        <c:addressbook-multiget xmlns:d="DAV:"
+          xmlns:c="urn:ietf:params:xml:ns:carddav">
+          <d:prop>
+            <c:address-data />
+          </d:prop>
+          #{cards.map{|h| '<d:href>' << h << '</d:href>'}.join}
+        </c:addressbook-multiget>
+END
+        )
+
+      # map non-empty vcards into Contact objects
+      REXML::XPath.each(xml,
+        "//multistatus/response/propstat/prop/address-data").
+        map{|vc| vc.text }.
+        reject{|t| !t }.
+        map{|t| Contact.new(self, t) }
     end
   end
 end
