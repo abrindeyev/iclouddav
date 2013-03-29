@@ -15,10 +15,14 @@ module ICloud
       @ical ||= RiCal.parse_string(self.ical_data).first
     end
 
+    def events
+      self.ical.events
+    end
+
     def to_remind
       out = ""
 
-      ical.events.each do |ev|
+      self.events.each do |ev|
         start = ev.dtstart.to_time.getlocal
         finish = ev.dtend.to_time.getlocal
 
