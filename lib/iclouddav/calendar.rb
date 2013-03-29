@@ -134,7 +134,7 @@ module ICloud
     end
 
     def url
-      "https://#{self.client.server}:#{self.client.port}#{path}"
+      "https://#{self.client.caldav_server}:#{self.client.port}#{path}"
     end
 
     def ical_data

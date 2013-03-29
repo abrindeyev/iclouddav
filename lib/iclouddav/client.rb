@@ -13,15 +13,15 @@ end
 
 module ICloud
   class Client
-    attr_accessor :server, :port, :email, :password, :debug
-    attr_reader :principal, :calendars
+    attr_accessor :caldav_server, :port, :email, :password, :debug
 
-    DEFAULT_SERVER = "p01-caldav.icloud.com"
+    DEFAULT_CALDAV_SERVER = "p01-caldav.icloud.com"
+    DEFAULT_CARDDAV_SERVER = "p01-contacts.icloud.com"
 
-    def initialize(email, password, server = DEFAULT_SERVER)
+    def initialize(email, password, caldav_server = DEFAULT_CALDAV_SERVER)
       @email = email
       @password = password
-      @server = server
+      @caldav_server = caldav_server
       @port = 443
 
       @debug = false
@@ -36,20 +36,24 @@ module ICloud
       @calendars ||= fetch_calendars
     end
 
-    def get(url, headers = {})
-      http_fetch(Net::HTTP::Get, url, headers)
+    def contacts
+      @contacts ||= fetch_contacts
     end
 
-    def propfind(url, headers = {}, xml)
-      http_fetch(Net::HTTP::Propfind, url, headers, xml)
+    def get(host, url, headers = {})
+      http_fetch(Net::HTTP::Get, host, url, headers)
     end
 
-    def report(url, headers = {}, xml)
-      http_fetch(Net::HTTP::Report, url, headers, xml)
+    def propfind(host, url, headers = {}, xml)
+      http_fetch(Net::HTTP::Propfind, host, url, headers, xml)
+    end
+
+    def report(host, url, headers = {}, xml)
+      http_fetch(Net::HTTP::Report, host, url, headers, xml)
     end
 
     def fetch_calendar_data(url)
-      xml = self.report(url, { "Depth" => 1 }, <<END
+      xml = self.report(self.caldav_server, url, { "Depth" => 1 }, <<END
         <d:sync-collection xmlns:d="DAV:">
           <d:sync-token/>
           <d:prop>
@@ -69,7 +73,7 @@ END
       end
 
       # bundle them all in one multiget
-      xml = self.report(url, { "Depth" => 1 }, <<END
+      xml = self.report(self.caldav_server, url, { "Depth" => 1 }, <<END
         <c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
           <d:prop>
             <c:calendar-data />
@@ -88,11 +92,11 @@ END
     end
 
   private
-    def http_fetch(req_type, url, headers = {}, data = nil)
+    def http_fetch(req_type, hhost, url, headers = {}, data = nil)
       # keep the connection alive since we're probably sending all requests to
       # it anyway and we'll gain some speed by not reconnecting every time
-      if !(host = @_http_cons["#{self.server}:#{self.port}"])
-        host = Net::HTTP.new(self.server, self.port)
+      if !(host = @_http_cons["#{hhost}:#{self.port}"])
+        host = Net::HTTP.new(hhost, self.port)
         host.use_ssl = true
         host.verify_mode = OpenSSL::SSL::VERIFY_PEER
 
@@ -105,7 +109,7 @@ END
         # connection even though we're specifying keep-alive
         host.start
 
-        @_http_cons["#{self.server}:#{self.port}"] = host
+        @_http_cons["#{hhost}:#{self.port}"] = host
       end
 
       req = req_type.new(url)
@@ -127,7 +131,7 @@ END
     end
 
     def fetch_principal
-      xml = self.propfind("/", { "Depth" => 1 },
+      xml = self.propfind(self.caldav_server, "/", { "Depth" => 1 },
         '<d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal />' <<
         '</d:prop></d:propfind>')
 
@@ -141,9 +145,10 @@ END
       # "/[principal user id]/calendars/" which is what calendar-home-set would
       # probably return anyway
 
-      xml = self.propfind("/#{self.principal.split("/")[1]}/calendars/",
-        { "Depth" => 1 }, '<d:propfind xmlns:d="DAV:"><d:prop>' <<
-        '<d:displayname/></d:prop></d:propfind>')
+      xml = self.propfind(self.caldav_server,
+        "/#{self.principal.split("/")[1]}/calendars/", { "Depth" => 1 },
+        '<d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop>' <<
+        '</d:propfind>')
 
       cals = {}
 
