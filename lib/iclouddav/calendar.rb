@@ -124,10 +124,10 @@ module ICloud
           out << " %3"
         end
 
-        out << ": %\"" << ev.summary.gsub("%", "%%") << "%\""
+        out << ": %\"" << ev.summary.gsub("%", "%%").gsub("\n", "%_") << "%\""
 
         if ev.location.present?
-          out << " (at " << ev.location << ")"
+          out << " (at " << ev.location.gsub("%", "%%").gsub("\n", "%_") << ")"
         end
 
         # suppress extra blank line
