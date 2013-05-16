@@ -155,13 +155,17 @@ END
         '<d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop>' <<
         '</d:propfind>')
 
-      REXML::XPath.each(xml, "//multistatus/response").map do |cal|
+      cals = REXML::XPath.each(xml, "//multistatus/response").map do |cal|
         path = cal.elements["href"].text
-        name = cal.elements["propstat"].elements["prop"].
-          elements["displayname"].text
+        if cal.elements["propstat"].elements["prop"].elements["displayname"]
+          name = cal.elements["propstat"].elements["prop"].
+            elements["displayname"].text
 
-        Calendar.new(self, path, name)
+          Calendar.new(self, path, name)
+        end
       end
+
+      cals.reject{|c| !c }
     end
 
     # returns an array of Contact objects
